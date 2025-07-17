@@ -1,0 +1,6 @@
+{
+  "name": "StoryCrafter AI",
+  "description": "An AI-powered co-creator that helps you craft short story drafts. Provide a few creative prompts and watch as the AI generates a title, chapters, characters, and plot progression for your next book.",
+  "requestFramePermissions": [],
+  "prompt": ""
+}
