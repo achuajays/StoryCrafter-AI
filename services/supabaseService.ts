@@ -1,8 +1,8 @@
-import { createClient } from '@supabase/supabase-js';
-import { StoryPrompt, StoryOutput } from '../types';
-import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../constants';
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+import { GoogleGenAI, Type } from '@google/genai';
+import { StoryPrompt, StoryOutput, Chapter } from '../types';
+
+const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
 
 const buildInitialPrompt = (prompt: StoryPrompt): string => {
   const chapterGenerationInstruction = prompt.isEpic
@@ -86,21 +86,25 @@ Just output the raw text of the chapter. Do not add any titles, delimiters, or e
 };
 
 const invokeGeminiFunction = async (prompt: string): Promise<string> => {
-    const { data, error } = await supabase.functions.invoke('gemini', {
-        body: { contents: prompt },
-    });
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+        });
 
-    if (error) {
-        console.error('Error invoking Supabase function:', error);
-        throw new Error(`The AI service failed: ${error.message}`);
+        const text = response.text;
+        if (!text) {
+             throw new Error('The AI returned an empty or invalid response.');
+        }
+
+        return text;
+    } catch (error) {
+        console.error('Error invoking Gemini API:', error);
+        if (error instanceof Error) {
+            throw new Error(`The AI service failed: ${error.message}`);
+        }
+        throw new Error('An unknown AI service error occurred.');
     }
-
-    if (!data || !data.text) {
-        console.error('Invalid response from Supabase function:', data);
-        throw new Error('The AI returned an empty or invalid response.');
-    }
-
-    return data.text;
 }
 
 export const generateInitialStory = async (promptData: StoryPrompt): Promise<string> => {
@@ -115,4 +119,59 @@ export const generateNextChapter = async (
 ): Promise<string> => {
     const fullPrompt = buildContinuationPrompt(originalPrompt, storySoFar, nextChapterTitle);
     return invokeGeminiFunction(fullPrompt);
+};
+
+export const translateChapter = async (
+    chapter: Chapter,
+    targetLanguageName: string
+): Promise<{ title: string; content: string }> => {
+    const prompt = `You are an expert translator. Your task is to translate the provided chapter of a book into ${targetLanguageName}.
+Translate both the chapter title and the chapter content.
+Ensure the translation is natural, maintains the original tone, and is grammatically correct.
+Do not add any commentary or extra text. Only provide the JSON output.
+
+Chapter Title to translate: "${chapter.title}"
+
+Chapter Content to translate:
+---
+${chapter.content}
+---
+`;
+
+    try {
+        const response = await ai.models.generateContent({
+            model: 'gemini-2.5-flash',
+            contents: prompt,
+            config: {
+                responseMimeType: 'application/json',
+                responseSchema: {
+                    type: Type.OBJECT,
+                    properties: {
+                        title: {
+                            type: Type.STRING,
+                            description: 'The translated chapter title.',
+                        },
+                        content: {
+                            type: Type.STRING,
+                            description: 'The full translated content of the chapter.',
+                        },
+                    },
+                    required: ['title', 'content'],
+                },
+            },
+        });
+
+        const translatedText = response.text.trim();
+        if (!translatedText) {
+            throw new Error('The AI returned an empty translation.');
+        }
+        return JSON.parse(translatedText);
+
+    } catch (error) {
+        console.error(`Error translating chapter to ${targetLanguageName}:`, error);
+        if (error instanceof Error) {
+            throw new Error(`The AI translation service failed: ${error.message}`);
+        }
+        throw new Error('An unknown AI translation service error occurred.');
+    }
 };

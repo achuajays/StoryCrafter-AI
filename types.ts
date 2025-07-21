@@ -1,3 +1,4 @@
+
 export interface StoryPrompt {
   genre: string;
   tone: string;
@@ -10,6 +11,9 @@ export interface StoryPrompt {
 export interface Chapter {
     title: string;
     content: string;
+    translatedTitle?: string | null;
+    translatedContent?: string | null;
+    translatedLanguage?: string | null;
 }
 
 export interface StoryOutput {
@@ -18,4 +22,14 @@ export interface StoryOutput {
   characters: string;
   chapterOutline: string[];
   chapters: Chapter[];
+}
+
+export interface StoryArtwork {
+  cover: string | null;
+  chapterIllustrations: (string | null)[];
+}
+
+export interface PromptTemplate {
+  name: string;
+  prompt: StoryPrompt;
 }

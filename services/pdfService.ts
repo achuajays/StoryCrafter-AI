@@ -1,5 +1,6 @@
+
 import jsPDF from 'jspdf';
-import { StoryOutput } from '../types';
+import { StoryOutput, StoryArtwork } from '../types';
 
 const A4_WIDTH_PT = 595.28;
 const A4_HEIGHT_PT = 841.89;
@@ -7,10 +8,6 @@ const MARGIN = 50;
 const CONTENT_WIDTH = A4_WIDTH_PT - MARGIN * 2;
 const FONT_FAMILY = 'times';
 
-/**
- * Adds text to the PDF, handling word wrapping and automatic page breaks.
- * @returns The Y position after the text has been added.
- */
 const addWrappedText = (
     doc: jsPDF, 
     text: string, 
@@ -19,11 +16,12 @@ const addWrappedText = (
     options: {
         maxWidth: number,
         lineHeight: number,
-        fontStyle?: 'normal' | 'bold' | 'italic',
-        fontSize: number
+        fontStyle?: 'normal' | 'bold' | 'italic' | 'bolditalic',
+        fontSize: number,
+        align?: 'left' | 'center' | 'right'
     }
 ): number => {
-    const { maxWidth, lineHeight, fontStyle, fontSize } = options;
+    const { maxWidth, lineHeight, fontStyle, fontSize, align } = options;
     doc.setFont(FONT_FAMILY, fontStyle || 'normal');
     doc.setFontSize(fontSize);
 
@@ -31,75 +29,119 @@ const addWrappedText = (
     let cursorY = y;
 
     lines.forEach((line: string) => {
-        // Check if there is enough space for the next line, otherwise add a new page
         if (cursorY + lineHeight > A4_HEIGHT_PT - MARGIN) {
             doc.addPage();
             cursorY = MARGIN;
         }
-        doc.text(line, x, cursorY);
+        let textX = x;
+        if (align === 'center') {
+            textX = A4_WIDTH_PT / 2;
+        } else if (align === 'right') {
+            textX = A4_WIDTH_PT - MARGIN;
+        }
+
+        doc.text(line, textX, cursorY, { align: align || 'left' });
         cursorY += lineHeight;
     });
 
     return cursorY;
 };
 
-export const generateBookPdf = (story: StoryOutput) => {
+export const generateBookPdf = (story: StoryOutput, artwork?: StoryArtwork | null) => {
     const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-    // We start fresh and manage all pages ourselves
     doc.deletePage(1);
 
-    // --- Page 1: Title Page ---
-    doc.addPage();
-    doc.setFont(FONT_FAMILY, 'bold');
-    doc.setFontSize(36);
-    doc.text(story.title, A4_WIDTH_PT / 2, A4_HEIGHT_PT / 3, { align: 'center' });
+    // --- Page 1: Full-Page Cover (if it exists) ---
+    if (artwork?.cover) {
+        doc.addPage();
+        try {
+            doc.addImage(artwork.cover, 'PNG', 0, 0, A4_WIDTH_PT, A4_HEIGHT_PT);
+        } catch (e) {
+            console.error("Could not add cover image to PDF:", e);
+        }
+    }
 
-    doc.setFont(FONT_FAMILY, 'normal');
-    doc.setFontSize(16);
-    doc.text("by StoryCrafter AI", A4_WIDTH_PT / 2, A4_HEIGHT_PT / 3 + 40, { align: 'center' });
+    // --- Title Page ---
+    doc.addPage();
+    let currentY;
+    
+    currentY = addWrappedText(doc, story.title, A4_WIDTH_PT / 2, A4_HEIGHT_PT / 3, { 
+        maxWidth: CONTENT_WIDTH, 
+        lineHeight: 40, 
+        fontSize: 36, 
+        fontStyle: 'bold',
+        align: 'center'
+    });
+    
+    currentY = addWrappedText(doc, "by StoryCrafter AI", A4_WIDTH_PT / 2, currentY + 10, { 
+        maxWidth: CONTENT_WIDTH, 
+        lineHeight: 20, 
+        fontSize: 16,
+        align: 'center'
+    });
 
     if (story.dedication) {
-        doc.setFont(FONT_FAMILY, 'italic');
-        doc.setFontSize(12);
-        const dedicationY = A4_HEIGHT_PT / 2;
-        addWrappedText(doc, story.dedication, A4_WIDTH_PT / 2, dedicationY, {
-            maxWidth: CONTENT_WIDTH - 100,
-            lineHeight: 18,
-            fontSize: 12,
+        addWrappedText(doc, story.dedication, A4_WIDTH_PT / 2, A4_HEIGHT_PT - MARGIN - 50, { 
+            maxWidth: CONTENT_WIDTH, 
+            lineHeight: 18, 
+            fontSize: 12, 
             fontStyle: 'italic',
+            align: 'center'
         });
     }
 
-    // --- Page 2: Table of Contents ---
+    // --- Table of Contents Page ---
     doc.addPage();
-    let currentY = MARGIN;
+    currentY = MARGIN;
     currentY = addWrappedText(doc, "Contents", MARGIN, currentY, { maxWidth: CONTENT_WIDTH, lineHeight: 30, fontSize: 24, fontStyle: 'bold' });
     currentY += 20;
 
-    story.chapterOutline.forEach((title, index) => {
-        const chapterLine = `Chapter ${index + 1}: ${title}`;
+    story.chapters.forEach((chapter, index) => {
+        const chapterLine = `Chapter ${index + 1}: ${chapter.title}`;
         currentY = addWrappedText(doc, chapterLine, MARGIN, currentY, { maxWidth: CONTENT_WIDTH, lineHeight: 18, fontSize: 12 });
-        currentY += 5; // Add small gap between entries
+        if (currentY > A4_HEIGHT_PT - MARGIN) { 
+            doc.addPage();
+            currentY = MARGIN; 
+        }
+        currentY += 5;
     });
 
-    // --- Page 3: Characters ---
-    doc.addPage();
-    currentY = MARGIN;
-    currentY = addWrappedText(doc, "Characters", MARGIN, currentY, { maxWidth: CONTENT_WIDTH, lineHeight: 30, fontSize: 24, fontStyle: 'bold' });
-    currentY += 20;
-    addWrappedText(doc, story.characters, MARGIN, currentY, { maxWidth: CONTENT_WIDTH, lineHeight: 16, fontSize: 12 });
+    // --- Characters Page ---
+    if (story.characters) {
+        doc.addPage();
+        currentY = MARGIN;
+        currentY = addWrappedText(doc, "Characters", MARGIN, currentY, { maxWidth: CONTENT_WIDTH, lineHeight: 30, fontSize: 24, fontStyle: 'bold' });
+        currentY += 20;
+        addWrappedText(doc, story.characters, MARGIN, currentY, { maxWidth: CONTENT_WIDTH, lineHeight: 16, fontSize: 12 });
+    }
 
-    // --- Subsequent Pages: The Story Chapters ---
+    // --- Story Chapters Pages ---
     story.chapters.forEach((chapter, index) => {
         doc.addPage();
         currentY = MARGIN;
+        
+        const illustration = artwork?.chapterIllustrations?.[index];
+        if (illustration) {
+            try {
+                const imgProps = doc.getImageProperties(illustration);
+                const aspectRatio = imgProps.width / imgProps.height;
+                const imgWidth = CONTENT_WIDTH;
+                const imgHeight = imgWidth / aspectRatio;
+                if (currentY + imgHeight < A4_HEIGHT_PT - MARGIN) {
+                    doc.addImage(illustration, 'PNG', MARGIN, currentY, imgWidth, imgHeight);
+                    currentY += imgHeight + 20;
+                }
+            } catch(e) {
+                 console.error(`Could not add illustration for chapter ${index + 1}:`, e);
+            }
+        }
+
         const chapterTitle = `Chapter ${index + 1}: ${chapter.title}`;
         currentY = addWrappedText(doc, chapterTitle, MARGIN, currentY, { maxWidth: CONTENT_WIDTH, lineHeight: 22, fontSize: 18, fontStyle: 'bold' });
         currentY += 20;
         addWrappedText(doc, chapter.content, MARGIN, currentY, { maxWidth: CONTENT_WIDTH, lineHeight: 16, fontSize: 12 });
     });
 
-    // --- Save the PDF ---
     const filename = `${story.title.replace(/[^a-z0-9]/gi, '_').toLowerCase() || 'story'}.pdf`;
     doc.save(filename);
 };

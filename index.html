@@ -8,12 +8,118 @@
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
       /* Custom font for a more book-like feel */
-      @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400..700;1,400..700&family=Poppins:wght@400;500;600;700&display=swap');
+      @import url('https://fonts.googleapis.com/css2?family=Lora:ital,wght@0,400..700;1,400..700&family=Poppins:wght@400;500;600;700&family=Courier+Prime:wght@400;700&display=swap');
+      
+      :root, body.theme-cyberpunk-noir {
+        --bg-primary: #0f172a; /* slate-900 */
+        --bg-secondary: rgba(30, 41, 59, 0.5); /* slate-800/50 */
+        --bg-input: #334155; /* slate-700 */
+        --bg-accent: #f59e0b; /* amber-500 */
+        --bg-accent-hover: #d97706; /* amber-600 */
+        --bg-disabled: #475569; /* slate-600 */
+        
+        --text-primary: #e2e8f0; /* slate-200 */
+        --text-secondary: #94a3b8; /* slate-400 */
+        --text-accent: #f59e0b; /* amber-400 */
+        --text-accent-contrast: #0f172a; /* slate-900 */
+        --text-error: #f87171; /* red-400 */
+        --text-link: #38bdf8; /* sky-400 */
+
+        --border-primary: rgba(51, 65, 85, 0.5); /* slate-700/50 */
+        --border-input: #475569; /* slate-600 */
+
+        --ring-color: #334155; /* slate-700 */
+        --ring-focus: #f59e0b; /* amber-400 */
+
+        --font-body: 'Poppins', sans-serif;
+        --font-serif: 'Lora', serif;
+      }
+
+      body.theme-parchment {
+        --bg-primary: #fdf6e3;
+        --bg-secondary: rgba(238, 224, 196, 0.5);
+        --bg-input: #f5ead5;
+        --bg-accent: #8B4513; /* SaddleBrown */
+        --bg-accent-hover: #A0522D; /* Sienna */
+        --bg-disabled: #d2b48c;
+
+        --text-primary: #584b3e;
+        --text-secondary: #8d7a66;
+        --text-accent: #8B4513;
+        --text-accent-contrast: #fdf6e3;
+        --text-error: #c00;
+        --text-link: #0066cc;
+
+        --border-primary: rgba(141, 122, 102, 0.5);
+        --border-input: #d2b48c;
+        
+        --ring-color: #d2b48c;
+        --ring-focus: #8B4513;
+
+        --font-body: 'Lora', serif;
+        --font-serif: 'Lora', serif;
+      }
+
+      body.theme-terminal {
+        --bg-primary: #000000;
+        --bg-secondary: rgba(20, 20, 20, 0.5);
+        --bg-input: #111;
+        --bg-accent: #00ff00;
+        --bg-accent-hover: #00cc00;
+        --bg-disabled: #333;
+
+        --text-primary: #00ff00;
+        --text-secondary: #00dd00;
+        --text-accent: #00ff00;
+        --text-accent-contrast: #000000;
+        --text-error: #ff0000;
+        --text-link: #00ffff;
+
+        --border-primary: #00ff00;
+        --border-input: #333;
+
+        --ring-color: #222;
+        --ring-focus: #00ff00;
+        
+        --font-body: 'Courier Prime', monospace;
+        --font-serif: 'Courier Prime', monospace;
+      }
+
       body {
-        font-family: 'Poppins', sans-serif;
+        background-color: var(--bg-primary);
+        color: var(--text-primary);
+        font-family: var(--font-body);
+        transition: background-color 0.3s, color 0.3s;
       }
       .font-serif {
-        font-family: 'Lora', serif;
+        font-family: var(--font-serif);
+      }
+
+      .bg-primary { background-color: var(--bg-primary); }
+      .bg-secondary { background-color: var(--bg-secondary); }
+      .bg-input { background-color: var(--bg-input); }
+      .bg-accent { background-color: var(--bg-accent); }
+      .hover\\:bg-accent-hover:hover { background-color: var(--bg-accent-hover); }
+      .disabled\\:bg-disabled:disabled { background-color: var(--bg-disabled); }
+      .peer:checked + .bg-accent-peer { background-color: var(--bg-accent); }
+      .text-primary { color: var(--text-primary); }
+      .text-secondary { color: var(--text-secondary); }
+      .text-accent { color: var(--text-accent); }
+      .text-accent-contrast { color: var(--text-accent-contrast); }
+      .text-error { color: var(--text-error); }
+      .text-link { color: var(--text-link); }
+      .border-primary { border-color: var(--border-primary); }
+      .border-input { border-color: var(--border-input); }
+      .ring-custom { --tw-ring-color: var(--ring-color); }
+      .focus\\:ring-accent:focus { --tw-ring-color: var(--ring-focus); }
+      .prose-custom p, .prose-custom li { color: var(--text-secondary); }
+
+      .theme-terminal .shadow-lg, .theme-terminal .shadow-2xl {
+        box-shadow: none;
+        border: 1px solid var(--ring-color);
+      }
+      .theme-parchment .shadow-lg, .theme-parchment .shadow-2xl {
+        box-shadow: 5px 5px 15px rgba(0, 0, 0, 0.15);
       }
     </style>
   <script type="importmap">
@@ -24,13 +130,14 @@
     "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
     "@google/genai": "https://esm.sh/@google/genai",
     "jspdf": "https://esm.sh/jspdf@2.5.1",
-    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2"
+    "@supabase/supabase-js": "https://esm.sh/@supabase/supabase-js@2",
+    "jszip": "https://esm.sh/jszip@3.10.1"
   }
 }
 </script>
 <link rel="stylesheet" href="/index.css">
 </head>
-  <body class="bg-slate-900 text-slate-200">
+  <body>
     <div id="root"></div>
   <script type="module" src="/index.tsx"></script>
 </body>
