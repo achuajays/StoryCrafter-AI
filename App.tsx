@@ -1,8 +1,8 @@
 
 import React, { useState, useCallback, useEffect } from 'react';
-import { StoryPrompt, StoryOutput, Chapter, StoryArtwork, PromptTemplate } from './types';
+import { StoryPrompt, StoryOutput, Chapter, StoryArtwork, PromptTemplate, AnalysisReport } from './types';
 import { GENRES, TONES, LANGUAGES, THEMES } from './constants';
-import { generateInitialStory, generateNextChapter, translateChapter } from './services/supabaseService';
+import { generateInitialStory, generateNextChapter, translateChapter, generatePlotTwists, generateAlternativeChapter, analyzeStory } from './services/supabaseService';
 import { generateImage } from './services/imageService';
 import Header from './components/Header';
 import PromptForm from './components/PromptForm';
@@ -75,7 +75,7 @@ const App: React.FC = () => {
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [isContinuing, setIsContinuing] = useState<boolean>(false);
   const [isGeneratingCover, setIsGeneratingCover] = useState<boolean>(false);
-  const [generatingIllustrationIndex, setGeneratingIllustrationIndex] = useState<number | null>(null);
+  const [generatingIllustrationIndices, setGeneratingIllustrationIndices] = useState<Set<number>>(new Set());
   const [error, setError] = useState<string | null>(null);
   
   // Translation State
@@ -89,6 +89,13 @@ const App: React.FC = () => {
     const saved = localStorage.getItem('storycrafter-templates');
     return saved ? JSON.parse(saved) : [];
   });
+  
+  // Writing Tools State
+  const [plotTwists, setPlotTwists] = useState<string[] | null>(null);
+  const [isGeneratingTwists, setIsGeneratingTwists] = useState<boolean>(false);
+  const [analysisReport, setAnalysisReport] = useState<AnalysisReport | null>(null);
+  const [isAnalyzing, setIsAnalyzing] = useState<boolean>(false);
+  const [generatingAlternativeFor, setGeneratingAlternativeFor] = useState<number | null>(null);
 
   useEffect(() => {
     document.body.className = '';
@@ -187,8 +194,9 @@ const App: React.FC = () => {
   }, [story, activePrompt, isGeneratingCover]);
   
   const handleGenerateChapterIllustration = useCallback(async (chapterIndex: number) => {
-    if (!story || !activePrompt || generatingIllustrationIndex !== null || chapterIndex >= story.chapters.length) return;
-    setGeneratingIllustrationIndex(chapterIndex);
+    if (!story || !activePrompt || generatingIllustrationIndices.has(chapterIndex) || chapterIndex >= story.chapters.length) return;
+    
+    setGeneratingIllustrationIndices(prev => new Set(prev).add(chapterIndex));
     setError(null);
     try {
         const chapter = story.chapters[chapterIndex];
@@ -204,9 +212,13 @@ const App: React.FC = () => {
         console.error(`Failed to generate illustration for chapter ${chapterIndex + 1}:`, err);
         setError(err instanceof Error ? err.message : 'An unknown error occurred while generating the illustration.');
     } finally {
-        setGeneratingIllustrationIndex(null);
+        setGeneratingIllustrationIndices(prev => {
+            const newSet = new Set(prev);
+            newSet.delete(chapterIndex);
+            return newSet;
+        });
     }
-  }, [story, activePrompt, generatingIllustrationIndex]);
+  }, [story, activePrompt, generatingIllustrationIndices]);
 
   const handleTranslateChapter = useCallback(async (chapterIndex: number) => {
     if (!story || targetLanguage === 'en' || translatingChapterIndex !== null || isTranslatingAll) return;
@@ -248,12 +260,10 @@ const App: React.FC = () => {
     const chaptersToTranslate = story.chapters.filter(ch => ch.translatedLanguage !== targetLanguage);
 
     for (const chapter of chaptersToTranslate) {
-        const index = story.chapters.indexOf(chapter);
         try {
-            // Re-using the single chapter logic to show progress
+            const index = story.chapters.findIndex(c => c.title === chapter.title);
             await handleTranslateChapter(index);
         } catch (err) {
-            // Error is set in the single handler
             setIsTranslatingAll(false);
             return; 
         }
@@ -291,7 +301,74 @@ const App: React.FC = () => {
         setPromptTemplates(prev => prev.filter(t => t.name !== templateName));
      }
   };
+  
+  // Writing Tools Handlers
+  const handleGeneratePlotTwists = useCallback(async () => {
+    if (!story || isGeneratingTwists) return;
+    setIsGeneratingTwists(true);
+    setError(null);
+    try {
+        const twists = await generatePlotTwists(story);
+        setPlotTwists(twists);
+    } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not generate plot twists.');
+        setPlotTwists(null);
+    } finally {
+        setIsGeneratingTwists(false);
+    }
+  }, [story, isGeneratingTwists]);
 
+  const handleGenerateAlternativeChapter = useCallback(async (chapterIndex: number) => {
+    if (!story || !activePrompt || generatingAlternativeFor !== null) return;
+    setGeneratingAlternativeFor(chapterIndex);
+    setError(null);
+    try {
+        const newContent = await generateAlternativeChapter(activePrompt, story, chapterIndex);
+        setStory(prev => {
+            if (!prev) return null;
+            const newChapters = [...prev.chapters];
+            newChapters[chapterIndex] = { ...newChapters[chapterIndex], alternativeContent: newContent };
+            return { ...prev, chapters: newChapters };
+        });
+    } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not generate alternative chapter.');
+    } finally {
+        setGeneratingAlternativeFor(null);
+    }
+  }, [story, activePrompt, generatingAlternativeFor]);
+
+  const handlePromoteAlternativeChapter = (chapterIndex: number) => {
+    setStory(prev => {
+        if (!prev || !prev.chapters[chapterIndex].alternativeContent) return prev;
+        const newChapters = [...prev.chapters];
+        const chapter = newChapters[chapterIndex];
+        newChapters[chapterIndex] = {
+            ...chapter,
+            content: chapter.alternativeContent!,
+            alternativeContent: null,
+            // Reset translation as it's for the old content
+            translatedContent: null,
+            translatedTitle: null,
+            translatedLanguage: null,
+        };
+        return { ...prev, chapters: newChapters };
+    });
+  };
+
+  const handleAnalyzeStory = useCallback(async () => {
+    if (!story || isAnalyzing) return;
+    setIsAnalyzing(true);
+    setError(null);
+    try {
+        const report = await analyzeStory(story);
+        setAnalysisReport(report);
+    } catch (err) {
+        setError(err instanceof Error ? err.message : 'Could not analyze the story.');
+        setAnalysisReport(null);
+    } finally {
+        setIsAnalyzing(false);
+    }
+  }, [story, isAnalyzing]);
 
   return (
     <div className="min-h-screen bg-primary text-primary">
@@ -328,7 +405,7 @@ const App: React.FC = () => {
                   onGenerateCover={handleGenerateCover}
                   isGeneratingCover={isGeneratingCover}
                   onGenerateChapterIllustration={handleGenerateChapterIllustration}
-                  generatingIllustrationIndex={generatingIllustrationIndex}
+                  generatingIllustrationIndices={generatingIllustrationIndices}
                   // Translation props
                   targetLanguage={targetLanguage}
                   onLanguageChange={handleLanguageChange}
@@ -336,6 +413,18 @@ const App: React.FC = () => {
                   translatingChapterIndex={translatingChapterIndex}
                   onTranslateAllChapters={handleTranslateAllChapters}
                   isTranslatingAll={isTranslatingAll}
+                  // Writing Tools Props
+                  plotTwists={plotTwists}
+                  isGeneratingTwists={isGeneratingTwists}
+                  onGeneratePlotTwists={handleGeneratePlotTwists}
+                  onClosePlotTwists={() => setPlotTwists(null)}
+                  analysisReport={analysisReport}
+                  isAnalyzing={isAnalyzing}
+                  onAnalyzeStory={handleAnalyzeStory}
+                  onCloseAnalysis={() => setAnalysisReport(null)}
+                  generatingAlternativeFor={generatingAlternativeFor}
+                  onGenerateAlternative={handleGenerateAlternativeChapter}
+                  onPromoteAlternative={handlePromoteAlternativeChapter}
                 />
               )}
               {!isLoading && !error && !story && (
