@@ -1,8 +1,61 @@
 
-import { GoogleGenAI, Type } from '@google/genai';
-import { StoryPrompt, StoryOutput, Chapter } from '../types';
+import { SUPABASE_URL, SUPABASE_ANON_KEY } from '../constants';
+import { StoryPrompt, StoryOutput, Chapter, AnalysisReport } from '../types';
 
-const ai = new GoogleGenAI({ apiKey: process.env.API_KEY! });
+interface GeminiRequestParams {
+    contents: string;
+    config?: {
+        responseMimeType?: string;
+        responseSchema?: any;
+    };
+}
+
+const callGeminiApi = async (params: GeminiRequestParams): Promise<any> => {
+    const functionName = 'gemini';
+    
+    try {
+        const response = await fetch(`${SUPABASE_URL}/functions/v1/${functionName}`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${SUPABASE_ANON_KEY}`
+            },
+            body: JSON.stringify(params)
+        });
+
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => ({ error: 'Request failed with status ' + response.status }));
+            throw new Error(errorData.error || `Request failed with status ${response.status}`);
+        }
+
+        const data = await response.json();
+        
+        if (params.config?.responseMimeType === 'application/json') {
+            try {
+                // The AI's JSON output can be stringified in the 'text' property or be the data itself
+                if (typeof data.text === 'string') {
+                    return JSON.parse(data.text);
+                }
+                return data; // Assume the function returned the JSON object directly
+            } catch (e) {
+                console.error("Failed to parse JSON response:", data, e);
+                throw new Error("The AI returned an invalid format. Please try again.");
+            }
+        }
+        
+        if (typeof data.text !== 'string') {
+             throw new Error("The AI returned an unexpected format. Expected text.");
+        }
+        
+        return data.text; // Return plain text if not expecting JSON
+    } catch (error: any) {
+        console.error('Error calling Supabase function:', error);
+        throw new Error(error.message || 'An unknown error occurred.');
+    }
+};
+
+
+// --- Prompt-building logic ---
 
 const buildInitialPrompt = (prompt: StoryPrompt): string => {
   const chapterGenerationInstruction = prompt.isEpic
@@ -85,31 +138,11 @@ Just output the raw text of the chapter. Do not add any titles, delimiters, or e
 `;
 };
 
-const invokeGeminiFunction = async (prompt: string): Promise<string> => {
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-        });
-
-        const text = response.text;
-        if (!text) {
-             throw new Error('The AI returned an empty or invalid response.');
-        }
-
-        return text;
-    } catch (error) {
-        console.error('Error invoking Gemini API:', error);
-        if (error instanceof Error) {
-            throw new Error(`The AI service failed: ${error.message}`);
-        }
-        throw new Error('An unknown AI service error occurred.');
-    }
-}
+// --- Exported functions now use the secure API caller ---
 
 export const generateInitialStory = async (promptData: StoryPrompt): Promise<string> => {
   const fullPrompt = buildInitialPrompt(promptData);
-  return invokeGeminiFunction(fullPrompt);
+  return callGeminiApi({ contents: fullPrompt });
 };
 
 export const generateNextChapter = async (
@@ -118,7 +151,7 @@ export const generateNextChapter = async (
   nextChapterTitle: string
 ): Promise<string> => {
     const fullPrompt = buildContinuationPrompt(originalPrompt, storySoFar, nextChapterTitle);
-    return invokeGeminiFunction(fullPrompt);
+    return callGeminiApi({ contents: fullPrompt });
 };
 
 export const translateChapter = async (
@@ -137,41 +170,101 @@ Chapter Content to translate:
 ${chapter.content}
 ---
 `;
-
-    try {
-        const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
-            contents: prompt,
-            config: {
-                responseMimeType: 'application/json',
-                responseSchema: {
-                    type: Type.OBJECT,
-                    properties: {
-                        title: {
-                            type: Type.STRING,
-                            description: 'The translated chapter title.',
-                        },
-                        content: {
-                            type: Type.STRING,
-                            description: 'The full translated content of the chapter.',
-                        },
-                    },
-                    required: ['title', 'content'],
-                },
+    const config = {
+        responseMimeType: 'application/json',
+        responseSchema: {
+            type: 'OBJECT',
+            properties: {
+                title: { type: 'STRING', description: 'The translated chapter title.' },
+                content: { type: 'STRING', description: 'The full translated content of the chapter.' },
             },
-        });
+            required: ['title', 'content'],
+        },
+    };
+    return callGeminiApi({ contents: prompt, config });
+};
 
-        const translatedText = response.text.trim();
-        if (!translatedText) {
-            throw new Error('The AI returned an empty translation.');
-        }
-        return JSON.parse(translatedText);
+export const generatePlotTwists = async (story: StoryOutput): Promise<string[]> => {
+    const storySummary = story.chapters.map((c, i) => `Chapter ${i + 1}: ${c.title}`).join('\n');
+    const prompt = `You are a creative writing assistant. Based on the story titled "${story.title}" and the following chapter summaries, generate 3-4 surprising and compelling plot twists.
+The twists should be distinct from one another.
 
-    } catch (error) {
-        console.error(`Error translating chapter to ${targetLanguageName}:`, error);
-        if (error instanceof Error) {
-            throw new Error(`The AI translation service failed: ${error.message}`);
+**Story Summary:**
+${storySummary}
+
+**Last Chapter Content:**
+${story.chapters[story.chapters.length - 1].content}
+
+**Task:**
+Return a JSON object containing a single key "twists" which is an array of strings.
+Example: { "twists": ["The friendly sidekick was the villain all along.", "The entire world is a simulation and the character is becoming self-aware."] }
+`;
+    const config = {
+        responseMimeType: 'application/json',
+        responseSchema: {
+            type: 'OBJECT',
+            properties: {
+                twists: { type: 'ARRAY', items: { type: 'STRING' } }
+            },
+            required: ['twists']
         }
-        throw new Error('An unknown AI translation service error occurred.');
+    };
+    const result = await callGeminiApi({ contents: prompt, config });
+    if (!result.twists || !Array.isArray(result.twists)) {
+        throw new Error("Invalid format for plot twists received from AI.");
     }
+    return result.twists;
+};
+
+export const generateAlternativeChapter = async (prompt: StoryPrompt, story: StoryOutput, chapterIndex: number): Promise<string> => {
+    const chapterToRewrite = story.chapters[chapterIndex];
+    const storyContext = story.chapters.slice(0, chapterIndex).map(c => c.content).join('\n\n---\n\n');
+    const fullPrompt = `You are a creative writing assistant. Your task is to rewrite a chapter of a story with a significant change or from a different perspective.
+**Original Story Idea:**
+- Genre: ${prompt.genre}
+- Tone: ${prompt.tone}
+- Main Character: ${prompt.character}
+**Story So Far (context):**
+${storyContext}
+**Original Chapter Content (Chapter ${chapterIndex + 1}: ${chapterToRewrite.title}):**
+---
+${chapterToRewrite.content}
+---
+**Your Task:**
+Rewrite this chapter. Introduce a different key decision, a new character's perspective, or an unexpected event that alters the course of this chapter. The new version should still logically follow the story context provided, but take this specific chapter in a new direction. Do not change the chapter title.
+**Output Structure:**
+Just output the raw text of the rewritten chapter. Do not add any titles, delimiters, or extra text.
+`;
+    return callGeminiApi({ contents: fullPrompt });
+};
+
+export const analyzeStory = async (story: StoryOutput): Promise<AnalysisReport> => {
+    const fullStoryText = story.chapters.map(c => `## ${c.title}\n\n${c.content}`).join('\n\n');
+    const prompt = `You are an expert writing critic. Analyze the following story draft.
+**Story Title:** ${story.title}
+**Full Text:**
+---
+${fullStoryText}
+---
+**Your Task:**
+Provide a critical analysis of the story. Focus on three key areas:
+1.  **Pacing:** Is the story well-paced? Does it drag in places or rush through important moments?
+2.  **Tone:** Is the tone consistent with the stated genre and consistent throughout the story?
+3.  **Suggestions:** Provide 2-3 actionable suggestions for how the author could improve the draft.
+**Output Structure:**
+Return a JSON object with the keys "pacing", "tone", and "suggestions".`;
+
+    const config = {
+        responseMimeType: 'application/json',
+        responseSchema: {
+            type: 'OBJECT',
+            properties: {
+                pacing: { type: 'STRING', description: "Analysis of the story's pacing." },
+                tone: { type: 'STRING', description: "Analysis of the story's tone." },
+                suggestions: { type: 'STRING', description: "Actionable suggestions for improvement." }
+            },
+            required: ['pacing', 'tone', 'suggestions']
+        }
+    };
+    return await callGeminiApi({ contents: prompt, config });
 };
