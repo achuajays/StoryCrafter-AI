@@ -14,6 +14,7 @@ export interface Chapter {
     translatedTitle?: string | null;
     translatedContent?: string | null;
     translatedLanguage?: string | null;
+    alternativeContent?: string | null;
 }
 
 export interface StoryOutput {
@@ -32,4 +33,10 @@ export interface StoryArtwork {
 export interface PromptTemplate {
   name: string;
   prompt: StoryPrompt;
+}
+
+export interface AnalysisReport {
+  pacing: string;
+  tone: string;
+  suggestions: string;
 }
